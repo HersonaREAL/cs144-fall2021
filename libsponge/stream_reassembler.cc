@@ -19,7 +19,7 @@ StreamReassembler::StreamReassembler(const size_t capacity) : _output(capacity),
 //! \details This function accepts a substring (aka a segment) of bytes,
 //! possibly out-of-order, from the logical stream, and assembles any newly
 //! contiguous substrings and writes them into the output stream in order.
-void StreamReassembler::push_substring(const string &data, const size_t index, const bool eof) {
+void StreamReassembler::push_substring(const string &data, const size_t index, const bool eof, const bool whatever) {
     if (index >= m_eofPos) {
         fflush();
         return;
@@ -29,10 +29,19 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
     size_t rlen = data.size();
     size_t ridx = index;
     size_t offset = 0;
+    bool recursion = false;
+    size_t recursion_idx = index;
+    size_t recursion_off = 0;
     auto it = m_substrs.lower_bound(index);
     if (it != m_substrs.end() && it != m_substrs.begin()) {
         //cut tail
         if (ridx + rlen > it->first) {
+            if ((ridx + rlen) > (it->first + it->second.size())) {
+                // recursive
+                recursion = true;
+                recursion_idx = it->first + it->second.size();
+                recursion_off = recursion_idx - ridx;
+            }
             rlen = it->first - ridx;
         }
 
@@ -46,6 +55,13 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
         }
     } else if (it == m_substrs.begin() && it != m_substrs.end()) {
         // data will insert to the map begin, cut tail of data if necessary 
+        if ((ridx + rlen) > (it->first + it->second.size())) {
+                // recursive
+                recursion = true;
+                recursion_idx = it->first + it->second.size();
+                recursion_off = recursion_idx - ridx;
+        }
+
         rlen = ridx + rlen > it->first ? it->first - ridx : rlen;
         if (ridx < m_pos) {
             if (rlen < (m_pos - ridx)) return;
@@ -73,23 +89,26 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
     }
 
     // can not store this chunk
-    if (m_pos != ridx && 
+    if (!whatever && m_pos != ridx && 
             (unassembled_bytes() + _output.buffer_size() + rlen > _capacity)) {
         fflush();
         return;
+    }
+
+    if (recursion) {
+        push_substring(data.substr(recursion_off), recursion_off, eof, m_pos == ridx);
     }
 
     // update substr
     if (rlen > 0) {
         string &&tmp = data.substr(offset, rlen);
         m_substrSize += rlen;
-        m_substrs[ridx] = tmp;
+        m_substrs[ridx] = std::move(tmp);
     }
 
     // deal with eof
     if (eof) {
         m_eofPos = ridx + rlen;
-        fflush();
     }
 
     // write to bytestream
