@@ -24,8 +24,13 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
         fflush();
         return;
     }
-    
-    //TODO overlap
+
+    // deal with eof
+    if (eof) {
+        m_eofPos = index + data.size();
+    }
+
+    // ==============overlap==============
     size_t rlen = data.size();
     size_t ridx = index;
     size_t offset = 0;
@@ -87,26 +92,24 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
             ridx = m_pos;
         }
     }
+    // ==============overlap==============
+
 
     // can not store this chunk
     if ((unassembled_bytes() + _output.buffer_size() + rlen > _capacity)) {
-        // TODO adjust rlen
+        // adjust rlen
         rlen = _capacity - (unassembled_bytes() + _output.buffer_size());
         recursion = false;
-        if (rlen == 0) {
-            fflush();
-            return;
-        }
     }
 
     //rlen limit int [assembled index, assembled index + capacity)
     if ((ridx + rlen) > (m_pos - _output.buffer_size() + _capacity)) {
+        // adjust rlen
         recursion = false;
-        rlen = (m_pos - _output.buffer_size() + _capacity) - ridx;
-        if (rlen == 0) {
-            fflush();
-            return;
-        }
+        if ((m_pos - _output.buffer_size() + _capacity) > ridx)
+            rlen = (m_pos - _output.buffer_size() + _capacity) - ridx;
+        else 
+            rlen = 0;
     }
 
     // update substr
@@ -118,11 +121,6 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
 
     if (recursion) {
         push_substring(data.substr(recursion_off), recursion_idx, eof);
-    }
-
-    // deal with eof
-    if (eof) {
-        m_eofPos = index + data.size();
     }
 
     // write to bytestream
