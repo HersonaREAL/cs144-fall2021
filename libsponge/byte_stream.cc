@@ -47,7 +47,6 @@ string ByteStream::peek_output(const size_t len) const {
 void ByteStream::pop_output(const size_t len) { 
     size_t rlen = len > buffer_size() ? buffer_size() : len;
     if (len > 0 && rlen == 0) {
-        _eof = true;
         return;
     }
     if (_idx_s + rlen >= _cap) {
@@ -66,7 +65,6 @@ void ByteStream::pop_output(const size_t len) {
 std::string ByteStream::read(const size_t len) {
     size_t rlen = len > buffer_size() ? buffer_size() : len;
     if (len > 0 && rlen == 0) {
-        _eof = true;
         return "";
     }
     string tmp(rlen, 0);
