@@ -19,7 +19,7 @@ StreamReassembler::StreamReassembler(const size_t capacity) : _output(capacity),
 //! \details This function accepts a substring (aka a segment) of bytes,
 //! possibly out-of-order, from the logical stream, and assembles any newly
 //! contiguous substrings and writes them into the output stream in order.
-void StreamReassembler::push_substring(const string &data, const size_t index, const bool eof, const bool whatever) {
+void StreamReassembler::push_substring(const string &data, const size_t index, const bool eof) {
     if (index >= m_eofPos) {
         fflush();
         return;
@@ -89,14 +89,24 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
     }
 
     // can not store this chunk
-    if (!whatever && m_pos != ridx && 
-            (unassembled_bytes() + _output.buffer_size() + rlen > _capacity)) {
-        fflush();
-        return;
+    if ((unassembled_bytes() + _output.buffer_size() + rlen > _capacity)) {
+        // TODO adjust rlen
+        rlen = _capacity - (unassembled_bytes() + _output.buffer_size());
+        recursion = false;
+        if (rlen == 0) {
+            fflush();
+            return;
+        }
     }
 
-    if (recursion) {
-        push_substring(data.substr(recursion_off), recursion_off, eof, m_pos == ridx);
+    //rlen limit int [assembled index, assembled index + capacity)
+    if ((ridx + rlen) > (m_pos - _output.buffer_size() + _capacity)) {
+        recursion = false;
+        rlen = (m_pos - _output.buffer_size() + _capacity) - ridx;
+        if (rlen == 0) {
+            fflush();
+            return;
+        }
     }
 
     // update substr
@@ -106,9 +116,13 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
         m_substrs[ridx] = std::move(tmp);
     }
 
+    if (recursion) {
+        push_substring(data.substr(recursion_off), recursion_idx, eof);
+    }
+
     // deal with eof
     if (eof) {
-        m_eofPos = ridx + rlen;
+        m_eofPos = index + data.size();
     }
 
     // write to bytestream
@@ -140,7 +154,7 @@ void StreamReassembler::fflush() {
         if (ret != sz) {
             string &&leftStr = data.substr(sz - ret);
             m_pos = m_pos + ret;
-            m_substrs[m_pos] = leftStr;
+            m_substrs[m_pos] = std::move(leftStr);
             m_substrs.erase(it);
             return;
         }

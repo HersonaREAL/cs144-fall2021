@@ -36,7 +36,7 @@ class StreamReassembler {
     //! \param data the substring
     //! \param index indicates the index (place in sequence) of the first byte in `data`
     //! \param eof the last byte of `data` will be the last byte in the entire stream
-    void push_substring(const std::string &data, const uint64_t index, const bool eof, const bool whatever = false);
+    void push_substring(const std::string &data, const uint64_t index, const bool eof);
 
     //! \name Access the reassembled byte stream
     //!@{
