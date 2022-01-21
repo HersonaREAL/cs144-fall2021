@@ -1,4 +1,5 @@
 #include "wrapping_integers.hh"
+#include <bits/stdint-uintn.h>
 #include <cstdint>
 
 // Dummy implementation of a 32-bit wrapping integer
@@ -32,6 +33,17 @@ WrappingInt32 wrap(uint64_t n, WrappingInt32 isn) {
 //! and the other stream runs from the remote TCPSender to the local TCPReceiver and
 //! has a different ISN.
 uint64_t unwrap(WrappingInt32 n, WrappingInt32 isn, uint64_t checkpoint) {
-    DUMMY_CODE(n, isn, checkpoint);
-    return {};
+    uint64_t step = (1ull) << 32;
+    uint32_t raw_n = n.raw_value(), raw_isn = isn.raw_value();
+    uint64_t diff = raw_n >= raw_isn ? raw_n - raw_isn : (step - raw_isn) + raw_n;
+    uint64_t left = checkpoint & (0xFFFFFFFF00000000), l_ans = left + diff; // bitwise opt
+    uint64_t right = left + step, r_ans = right + diff;
+    if (l_ans >= checkpoint) {
+        if (l_ans < step) return l_ans;
+        l_ans -= step;
+        r_ans -= step;
+    }
+    uint64_t left_distance = checkpoint - l_ans;
+    uint64_t right_distance = r_ans - checkpoint;
+    return left_distance < right_distance ? l_ans : r_ans;
 }
