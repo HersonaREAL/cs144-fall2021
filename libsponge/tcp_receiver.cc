@@ -27,6 +27,7 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
 
     uint64_t seg_index = unwrap(seg.header().seqno, m_ISN, m_Aackno - 1);
     if (seg_index == 0 && seg.payload().size() > 0 && firstInit) {
+        // syn set with data
         seg_index++;
     }
 
@@ -38,17 +39,15 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
         eof = true;
 
         if (seg_index == 0 && firstInit) {
-            //just ISN and FIN
+            //just ISN and FIN, there isnt data
             _reassembler.push_substring("", 0, true);
             m_Aackno = _reassembler.stream_idx() + 1;
             m_ackno = wrap(m_Aackno, m_ISN);
-            _reassembler.stream_out().end_input();
         }
     }
 
     if (seg_index > 0) {
         _reassembler.push_substring(seg.payload().copy(), seg_index - 1, eof);
-
         m_Aackno = _reassembler.stream_idx() + 1;
         m_ackno = wrap(m_Aackno, m_ISN);
     }
@@ -57,7 +56,6 @@ void TCPReceiver::segment_received(const TCPSegment &seg) {
     if (_reassembler.isArrivedEof()) {
         m_Aackno++;
         m_ackno = m_ackno + 1;
-        _reassembler.stream_out().end_input();
     }
 }
 
