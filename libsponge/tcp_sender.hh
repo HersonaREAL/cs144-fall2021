@@ -6,8 +6,32 @@
 #include "tcp_segment.hh"
 #include "wrapping_integers.hh"
 
+#include <bits/stdint-uintn.h>
 #include <functional>
 #include <queue>
+
+class TCP_RTTimer
+{
+public:
+    TCP_RTTimer() = delete;
+    TCP_RTTimer(std::function<void()> cb) : m_cb(cb) {}
+    unsigned int getRsendCnt() const { return m_resend_cnt; }
+    uint64_t getRto() const { return m_rto; }
+    void setRto(uint64_t rto) { m_rto = rto; }
+    void inc_resent_cnt() { ++m_resend_cnt; }
+    void reset_resent_cnt() { m_resend_cnt = 0; }
+    void stop() { m_stop = true; }
+    void start() { m_stop = false; }
+    bool is_stop() const { return m_stop; }
+    void inc_elapse(size_t ms);
+    void restart();
+private:
+    bool m_stop = true;
+    unsigned int m_resend_cnt = 0; //record resent cnt
+    uint64_t m_rto = 0;
+    uint64_t m_elapse = 0;
+    std::function<void()> m_cb = nullptr;
+};
 
 //! \brief The "sender" part of a TCP implementation.
 
@@ -32,6 +56,15 @@ class TCPSender {
     //! the (absolute) sequence number for the next byte to be sent
     uint64_t _next_seqno{0};
 
+    uint64_t m_rightEdge  = 1;
+    uint64_t m_lastAck = 0;
+    uint64_t m_flyBytes = 0;       //will be ack bytes
+    std::queue<std::pair<uint64_t, TCPSegment>> m_outstandings{};
+    TCP_RTTimer m_timer;
+
+  private:
+    void resend();
+
   public:
     //! Initialize a TCPSender
     TCPSender(const size_t capacity = TCPConfig::DEFAULT_CAPACITY,
@@ -54,7 +87,7 @@ class TCPSender {
     void send_empty_segment();
 
     //! \brief create and send segments to fill as much of the window as possible
-    void fill_window();
+    void fill_window(bool fromSingleByte = false);
 
     //! \brief Notifies the TCPSender of the passage of time
     void tick(const size_t ms_since_last_tick);
