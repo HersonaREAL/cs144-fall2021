@@ -30,7 +30,12 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     
     m_lastRecTime = m_elapse;
 
-    if (seg.header().rst) {
+    // ignore rst in listen
+    if (seg.header().rst && _sender.next_seqno_absolute() == 0) {
+        return;
+    }
+
+    if (seg.header().rst && _sender.next_seqno_absolute() > 0) {
         // close connection
         _receiver.stream_out().set_error();
         _sender.stream_in().set_error();
@@ -39,14 +44,17 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         m_active = false;
     }
 
+
     // give seg to receiver
     _receiver.segment_received(seg);
 
     // for sender ACK
-    if (seg.header().ack) {
+    if (_sender.next_seqno_absolute() > 0 && seg.header().ack) {
         _sender.ack_received(seg.header().ackno, seg.header().win);
+    } else if (_sender.next_seqno_absolute() == 0 && seg.header().syn) {
+        // for syn
+        _sender.fill_window();
     }
-    _sender.fill_window();
 
     // if received an seg which occupied space, send reply
     if (seg.length_in_sequence_space() > 0 && _segments_out.empty() && _sender.segments_out().empty()) {
@@ -68,8 +76,15 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     }
 
     // set linger state
-    if (_receiver.stream_out().eof() && !_sender.stream_in().eof()) {
+    if (_receiver.stream_out().input_ended() && !_sender.stream_in().eof()) {
         _linger_after_streams_finish = false;
+    }
+
+    if (!_linger_after_streams_finish && 
+            _sender.stream_in().bytes_written() + 2 == _sender.next_seqno_absolute()
+            && _sender.bytes_in_flight() == 0) {
+        // std::cout << "ffffffffffin\n" ;
+        m_active = false;
     }
 
     ready_segments();
@@ -78,6 +93,7 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
 bool TCPConnection::active() const { return m_active; }
 
 size_t TCPConnection::write(const string &data) {
+    if (!m_active) return 0;
     size_t ret = _sender.stream_in().write(data);
     _sender.fill_window();
     ready_segments();
@@ -87,6 +103,16 @@ size_t TCPConnection::write(const string &data) {
 //! \param[in] ms_since_last_tick number of milliseconds since the last call to this method
 void TCPConnection::tick(const size_t ms_since_last_tick) {
     m_elapse += ms_since_last_tick;
+    if (!m_active) return;
+
+    if (_sender.consecutive_retransmissions() >= TCPConfig::MAX_RETX_ATTEMPTS) {
+        // send rst
+        m_active = false;
+        _sender.stream_in().set_error();
+        _receiver.stream_out().set_error();
+        return send_rst_segment();
+    }
+
     _sender.tick(ms_since_last_tick);
     ready_segments();
 
@@ -100,11 +126,7 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
         return;
     }
 
-    if (_sender.consecutive_retransmissions() > TCPConfig::MAX_RETX_ATTEMPTS) {
-        // send rst
-        m_active = false;
-        return send_rst_segment();
-    }
+    
 
     
 }
@@ -128,10 +150,13 @@ void TCPConnection::ready_segments() {
     }
 
     // outbound close and inbound close
-    if (_sender.stream_in().eof() && !_linger_after_streams_finish) {
-        m_active = false;
-    } else if (_sender.stream_in().eof() &&
-            _receiver.stream_out().eof() && 
+    // if (_sender.stream_in().eof() &&
+    //         _receiver.stream_out().input_ended() &&
+    //         !_linger_after_streams_finish) {
+    //     m_active = false;
+    // } else 
+    if (_sender.stream_in().eof() &&
+            _receiver.stream_out().input_ended() && 
             _linger_after_streams_finish && !m_lingering) {
         m_lingering = true;
         m_lingerStartTime = m_elapse;
@@ -139,6 +164,7 @@ void TCPConnection::ready_segments() {
 }
 
 void TCPConnection::end_input_stream() {
+    if (!m_active) return;
     _sender.stream_in().end_input();
     _sender.fill_window();
     ready_segments();
