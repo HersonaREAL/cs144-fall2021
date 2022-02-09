@@ -18,6 +18,7 @@ ByteStream::ByteStream(const size_t capacity) {
 }
 
 size_t ByteStream::write(const string &data) {
+    if (m_close) return 0;
     size_t len = data.size() > m_remain_cap ? m_remain_cap : data.size();
     
     m_bytes.insert(m_bytes.end(), data.begin(), data.begin() + len);
