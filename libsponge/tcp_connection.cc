@@ -36,11 +36,9 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     }
 
     if (seg.header().rst && _sender.next_seqno_absolute() > 0) {
-        // close connection
+        // kill connection
         _receiver.stream_out().set_error();
         _sender.stream_in().set_error();
-        
-        // TODO kill connection
         m_active = false;
     }
 
@@ -58,14 +56,6 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
 
     // if received an seg which occupied space, send reply
     if (seg.length_in_sequence_space() > 0 && _segments_out.empty() && _sender.segments_out().empty()) {
-        // TCPSegment reply_seg;
-        // reply_seg.header().seqno = _sender.next_seqno();
-        // reply_seg.header().ack = true;
-        // if (!_receiver.ackno().has_value())
-        //     throw "receiver invaild!";
-        // reply_seg.header().ackno = _receiver.ackno().value();
-        // reply_seg.header().win = _receiver.window_size();
-        // _segments_out.push(reply_seg);
         _sender.send_empty_segment();
     }
 
@@ -80,11 +70,11 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
         _linger_after_streams_finish = false;
     }
 
+    // shutdown in LAST ACK
     if (!_linger_after_streams_finish && 
-            _sender.stream_in().bytes_written() + 2 == _sender.next_seqno_absolute()
-            && _sender.bytes_in_flight() == 0) {
-        // std::cout << "ffffffffffin\n" ;
+            isSenderAckFin() && !m_lingering) {
         m_active = false;
+        return;
     }
 
     ready_segments();
@@ -105,6 +95,7 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
     m_elapse += ms_since_last_tick;
     if (!m_active) return;
 
+    // max resend
     if (_sender.consecutive_retransmissions() >= TCPConfig::MAX_RETX_ATTEMPTS) {
         // send rst
         m_active = false;
@@ -113,21 +104,16 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
         return send_rst_segment();
     }
 
-    _sender.tick(ms_since_last_tick);
-    ready_segments();
-
-    // TODO end connection cleanly
+    // end connection cleanly
     if (m_lingering) {
-        // std::cout << "timeout time: " << (m_lingerStartTime + 10* (_cfg.rt_timeout))
-        //             << " elapse: " << m_elapse << std::endl;
         if ((m_lingerStartTime + 10* (_cfg.rt_timeout)) <= m_elapse) {
             m_active = false;
         }
         return;
     }
 
-    
-
+    _sender.tick(ms_since_last_tick);
+    ready_segments();
     
 }
 
@@ -149,13 +135,8 @@ void TCPConnection::ready_segments() {
         _sender.segments_out().pop();
     }
 
-    // outbound close and inbound close
-    // if (_sender.stream_in().eof() &&
-    //         _receiver.stream_out().input_ended() &&
-    //         !_linger_after_streams_finish) {
-    //     m_active = false;
-    // } else 
-    if (_sender.stream_in().eof() &&
+    // enter TimeWait
+    if (isSenderAckFin() &&
             _receiver.stream_out().input_ended() && 
             _linger_after_streams_finish && !m_lingering) {
         m_lingering = true;

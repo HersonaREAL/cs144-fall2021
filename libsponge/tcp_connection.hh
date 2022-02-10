@@ -29,6 +29,10 @@ class TCPConnection {
   private:
     void send_rst_segment();
     void ready_segments();
+    bool isSenderAckFin() const { 
+        return _sender.stream_in().bytes_written() + 2 == _sender.next_seqno_absolute()
+            && _sender.bytes_in_flight() == 0;
+    }
 
   public:
     //! \name "Input" interface for the writer
